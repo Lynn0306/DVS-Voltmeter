@@ -19,10 +19,9 @@ import os
 import numpy as np
 import cv2
 import tqdm
-from simulation_scripts.config import cfg
-from simulation_scripts.simulator import EventSim
-from simulation_scripts.visualize import events_to_voxel_grid, visual_voxel_grid
-
+from src.config import cfg
+from src.simulator import EventSim
+from src.visualize import events_to_voxel_grid, visual_voxel_grid
 
 def get_args_from_command_line():
     parser = argparse.ArgumentParser(description='Parser of Runner of Network')
@@ -33,6 +32,17 @@ def get_args_from_command_line():
     args = parser.parse_args()
     return args
 
+def integrate_cfg(cfg, command_line_args):
+    args = command_line_args
+    cfg.SENSOR.CAMERA_TYPE = args.camera_type if args.camera_type is not None else cfg.SENSOR.CAMERA_TYPE
+    cfg.SENSOR.K = args.model_para if args.model_para is not None else cfg.SENSOR.K
+    cfg.DIR.IN_PATH = args.input_dir if args.input_dir is not None else cfg.DIR.IN_PATH
+    cfg.DIR.OUT_PATH = args.output_dir if args.output_dir is not None else cfg.DIR.OUT_PATH
+    if cfg.SENSOR.K is None or len(cfg.SENSOR.K) != 6:
+        raise Exception('No model parameters given for sensor type %s' % cfg.SENSOR.CAMERA_TYPE)
+    print(cfg)
+    return cfg
+
 def is_valid_dir(dirs):
     return os.path.exists(os.path.join(dirs, 'info.txt'))
 
@@ -42,8 +52,8 @@ def process_dir(cfg, file_info, video_name):
     print(f"Processing folder {indir}... Generating events in file {outdir}")
 
     # file info
-    file_timestamps_us = [int(info_i.split()[0]) for info_i in file_info]
-    file_paths = [info_i.split()[1] for info_i in file_info]
+    file_timestamps_us = [int(info_i.split()[1]) for info_i in file_info]
+    file_paths = [info_i.split()[0] for info_i in file_info]
 
     # set simulator
     sim = EventSim(cfg=cfg, output_folder=cfg.DIR.OUT_PATH, video_name=video_name)
@@ -84,13 +94,7 @@ def process_dir(cfg, file_info, video_name):
 
 if __name__ == "__main__":
     args = get_args_from_command_line()
-    cfg.SENSOR.CAMERA_TYPE = args.camera_type if args.camera_type is not None else cfg.SENSOR.CAMERA_TYPE
-    cfg.SENSOR.K = args.model_para if args.model_para is not None else cfg.SENSOR.K
-    cfg.DIR.IN_PATH = args.input_dir if args.input_dir is not None else cfg.DIR.IN_PATH
-    cfg.DIR.OUT_PATH = args.output_dir if args.output_dir is not None else cfg.DIR.OUT_PATH
-    if cfg.SENSOR.K is None or len(cfg.SENSOR.K) != 6:
-        raise Exception('No model parameters given for sensor type %s' % cfg.SENSOR.CAMERA_TYPE)
-    print(cfg)
+    cfg = integrate_cfg(cfg, args)
 
     video_list = sorted(os.listdir(cfg.DIR.IN_PATH))
     for video_i in video_list:

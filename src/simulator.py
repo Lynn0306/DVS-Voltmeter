@@ -17,7 +17,7 @@
 import os
 import numpy as np
 import torch
-from simulation_scripts.simulator_utils import event_generation
+from .simulator_utils import event_generation
 
 class EventSim(object):
     def __init__(

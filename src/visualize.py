@@ -47,8 +47,8 @@ def events_to_voxel_grid(events, num_bins, width, height):
 
     ts = events[:, 0].astype(np.float32)
     ts = (num_bins - 1) * (ts - first_stamp) / deltaT
-    xs = events[:, 1]
-    ys = events[:, 2]
+    xs = events[:, 1].astype(np.int32)
+    ys = events[:, 2].astype(np.int32)
     pols = events[:, 3].astype(np.float32)
     pols[pols == 0] = -1  # polarity should be +1 / -1
 
