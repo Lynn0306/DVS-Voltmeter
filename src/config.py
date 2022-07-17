@@ -32,8 +32,8 @@ elif cfg.SENSOR.CAMERA_TYPE == 'DVS240':
 
 # Directories
 __C.DIR                                 = edict()
-__C.DIR.IN_PATH = './data_samples/original'
-__C.DIR.OUT_PATH = './data_samples/output'
+__C.DIR.IN_PATH = 'data_samples/original/'
+__C.DIR.OUT_PATH = 'data_samples/output/'
 
 
 # Visualize

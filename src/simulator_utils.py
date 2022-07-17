@@ -252,9 +252,9 @@ def event_generation(ep_on, ep_off, mu, sigma, delta_vd_res, start_t, end_t, x=N
         mu_next = mu[no_end_mask]
         sigma_next = sigma[no_end_mask]
         delta_vd_res_next = torch.zeros_like(ep_on_next, device=ep_on_next.device)
-        x_next = events_x
-        y_next = events_y
-        t_next = events_t
+        x_next = x[no_end_mask]
+        y_next = y[no_end_mask]
+        t_next = t_end_ideal[no_end_mask]
         e_t, e_x, e_y, e_p, e_delta_vd = event_generation(
             ep_on_next, ep_off_next, mu_next, sigma_next, delta_vd_res_next, t_next, end_t, x_next, y_next)
 
