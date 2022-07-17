@@ -3,6 +3,7 @@
 Code repo for the paper 'DVS-Voltmeter: Stochastic Process-based Event Simulator for Dynamic Vision Sensors'.
 
 ## Prerequisites
+
 ```
 easydict == 1.9
 pytorch >= 1.8
@@ -10,15 +11,18 @@ numpy >= 1.20.1
 opencv-python == 4.5.1.48
 tqdm == 4.49.0
 ```
+
 The code may be compatible with lower versions, while the aforementioned ones have been tested.
 
-## Get Started
+## Dataset
 
-Put videos in ***data_samples/original*** folder and modify the data index tree as following:
+The sample input video frames to try DVS-Voltmeter with are in [samples](https://drive.google.com/drive/folders/1puqNjrdDrk69RsSsNL3CyERtJSJFmX5p?usp=sharing) on google drive. Download samples and put them in ***data_samples/interp*** folder.
+
+To simulate events from other videos, put high frame-rate videos (can be obtained by video interpolation) in ***data_samples/interp*** folder and modify the data index tree as following:
 
 ```
 ├── [data_samples]
-│   ├── original
+│   ├── interp
 │   │   ├── videoname1
 │   │   │   ├── info.txt
 │   │   │   ├── framename11.png
@@ -39,6 +43,7 @@ The video info file ***info.txt*** records the path and timestamp ($\mu s$) of e
 ## Biblography
 
 If you find our work useful, please use the following citation.
+
 ```
 @inproceedings{lin2022dvsvoltmeter,
   title={DVS-Voltmeter: Stochastic Process-based Event Simulator for Dynamic Vision Sensors},
