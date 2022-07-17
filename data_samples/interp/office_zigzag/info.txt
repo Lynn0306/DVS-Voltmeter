@@ -1,0 +1,2 @@
+./data_samples/interp/office_zigzag/000.png 000000013767
+./data_samples/interp/office_zigzag/001.png 000000018173
