@@ -16,72 +16,56 @@
 
 import torch
 import numpy as np
+import random
 import math
 
 
-def sample_IG(ep, mu_in, sigma_in):
-    '''
-    Notes:
-        Time interval follows an inverse Gaussian distribution with non-zero drift parameter mu (Eq. (13))
-        See url for details:
-        https://https://en.wikipedia.org/wiki/Inverse_Gaussian_distribution#Sampling_from_an_inverse-Gaussian_distribution
-    Input:
-        :param ep: target voltage change (-ep_on or ep_off)
-        :param mu_in: drift parameter of Brownian motion with drift
-        :param sigma_in: scale parameter of Brownian motion with drift
-    :return:
-    '''
+def sample_non_c_zero(ep, c_in, sigma_in):
+    # 取inverse gaussian的分布
+    # https://en.wikipedia.org/wiki/Inverse_Gaussian_distribution
+    pos_c_position = c_in > 0
+    neg_c_position = c_in < 0
 
-    # Sampling from IG(mean, scale)
-    mean = ep / mu_in
-    scale = torch.pow(ep / sigma_in, 2.0)
+    X = torch.empty_like(ep, dtype=ep.dtype,
+                         device=ep.device)
 
-    # ------------------
-    # Generate a random variate from a normal distribution v ~ N(0,1)
-    V = torch.empty_like(ep, dtype=ep.dtype, device=ep.device)
-    pos_mean_position = mean > 0
-    neg_mean_position = mean < 0
-    # positive mean: random sampling
-    V_pos_mean = torch.randn(size=(torch.sum(pos_mean_position),), dtype=ep.dtype, device=ep.device)
-    V[pos_mean_position] = V_pos_mean
-    # negative mean: truncated normal to avoid invalid sqrt operation
-    ep_neg_mean = ep[neg_mean_position]
-    mu_neg_mean = mu_in[neg_mean_position]
-    sigma_neg_mean = sigma_in[neg_mean_position]
-    v_max_thres = -1 * torch.sqrt(-4 * ep_neg_mean * mu_neg_mean / torch.pow(sigma_neg_mean, 2.0))
-    sample_mean = torch.zeros_like(v_max_thres, device=v_max_thres.device)
-    sample_sigma = torch.ones_like(v_max_thres, device=v_max_thres.device)
+    # same direction
+    X_Pos = torch.randn(size=(torch.sum(pos_c_position),), dtype=ep.dtype, device=ep.device)
+    X[pos_c_position] = X_Pos
+
+    # opposite direction  # why?
+    ep_neg = ep[neg_c_position]
+    c_neg = c_in[neg_c_position]
+    sigma_in_neg = sigma_in[neg_c_position]
+    x_max_thres = -1 * torch.sqrt(-4 * ep_neg *
+                                  c_neg / torch.pow(sigma_in_neg, 2.0))
+    sample_mean = torch.zeros_like(x_max_thres, device=x_max_thres.device)
+    sample_sigma = torch.ones_like(x_max_thres, device=x_max_thres.device)
     sample_inf = sample_sigma * (-1) * np.inf
-    v_truncated = sample_truncated_normal(sample_mean, sample_sigma, sample_inf, v_max_thres)
-    V[neg_mean_position] = v_truncated
+    x_truncated = sample_truncated_normal(
+        sample_mean, sample_sigma, sample_inf, x_max_thres)
+    X[neg_c_position] = x_truncated
 
-    # ------------------
-    Y = mean * V * V
-    Z = (4 * scale * Y + Y * Y)
-    X = mean + mean / 2 / scale * (Y - torch.sqrt(Z))  # use the relation.
+    mean = ep / c_in
+    lambda_ig = torch.pow(ep / sigma_in, 2.0)
+    scale = lambda_ig
+    mu = mean / 2 / scale
 
-    # ------------------
-    # Another random uniform-distribution variate to compare.
+    Y = mean * X * X
+    Z = (4*scale*Y + Y * Y)
+    X = mean + mu * (Y - torch.sqrt(Z))
+
     U = torch.empty_like(ep, device=ep.device)
     U.uniform_()
-    out = torch.where(U > mean / (mean + X), mean * mean / X, X)
+    out = torch.where(U > mean/(mean + X), mean * mean / X, X)
     return out
 
 
 def sample_levy(c, mu=0):
-    '''
-    Notes:
-        Time interval follows a L ́evy distribution when mu = 0 (Eq. (14))
-        See url for details
-        https://en.wikipedia.org/wiki/Inverse_Gaussian_distribution
-        https://en.wikipedia.org/wiki/L%C3%A9vy_distribution#Random_sample_generation
-    Input:
-        :param ep: target amplitude of voltage change
-        :param mu: const = 0
-    :return:
-        out: time interval
-    '''
-
+    # standard brown movement without drift
+    # 分布服从c=(alpha/sigma)^2 的levy分布，详情请看
+    # https://en.wikipedia.org/wiki/Inverse_Gaussian_distribution
+    # https://en.wikipedia.org/wiki/L%C3%A9vy_distribution#Random_sample_generation
     u = torch.empty_like(c, device=c.device)
     u.uniform_()
     ev = torch.erfinv(1-u)
@@ -89,42 +73,51 @@ def sample_levy(c, mu=0):
     return out
 
 
-def sample_timestamp(episilon: torch.Tensor, mu: torch.Tensor, sigma: torch.Tensor):
-    '''
-    Notes:
-        Time interval follows an inverse Gaussian distribution with non-zero drift parameter mu (Eq. (13));
-        Time interval follows a L ́evy distribution when mu = 0 (Eq. (14))
-    Input:
-        :param episilon: target voltage change (-ep_on or ep_off)
-        :param mu: drift parameter of Brownian motion with drift
-        :param sigma: scale parameter of Brownian motion with drift
-    :return:
-        delta_t_tensor: time interval
-    '''
+def sample_IG_torch(episilon: torch.Tensor, c: torch.Tensor, sigma: torch.Tensor):
     assert isinstance(episilon, torch.Tensor)
-    assert isinstance(mu, torch.Tensor)
+    assert isinstance(c, torch.Tensor)
     delta_t_tensor = torch.zeros_like(episilon, device=episilon.device)
 
-    # ------------------
-    # L ́evy distribution when mu = 0 (Eq. (14))
-    zero_mu_mask = mu == 0.0
-    ep_zero_mu = episilon[zero_mu_mask]
-    sigma_zero_mu = sigma[zero_mu_mask]
-    scale_levy = torch.pow(ep_zero_mu / sigma_zero_mu, 2.0)
-    delta_t_zero_mu = sample_levy(scale_levy).reshape(-1)
+    # 当有没有漂移的时候有不同分布，有漂移是inverse gaussian，没有是Levy
+    # 以下是levy代码
+    zeros_mask = c == 0.0
+    ep_zeros_c = episilon[zeros_mask]
+    sigma_zeros_c = sigma[zeros_mask]
+    scale_levy = torch.pow(ep_zeros_c / sigma_zeros_c, 2.0)
+    delta_t_c_zero = sample_levy(scale_levy).reshape(-1)
 
-    # ------------------
-    # Inverse Gaussian distribution when mu != 0 (Eq. (13))
-    non_zero_mu_mask = ~zero_mu_mask
-    ep_non_zero_mu = episilon[non_zero_mu_mask]
-    mu_non_zero_mu = mu[non_zero_mu_mask]
-    sigma_non_zero_mu = sigma[non_zero_mu_mask]
-    delta_t_non_zero_mu = sample_IG(ep_non_zero_mu, mu_non_zero_mu, sigma_non_zero_mu).reshape(-1)
+    # where_non_zeros = torch.nonzero(torch.logical_not(zeros_mask))
+    where_non_zeros = ~zeros_mask
+    ep_non_zeros = episilon[where_non_zeros]
+    c_non_zeros = c[where_non_zeros]
+    sigma_non_zeros = sigma[where_non_zeros]
+    delta_t_c_non_zero = sample_non_c_zero(
+        ep_non_zeros, c_non_zeros, sigma_non_zeros).reshape(-1)
 
-    delta_t_tensor[zero_mu_mask] = delta_t_zero_mu
-    delta_t_tensor[non_zero_mu_mask] = delta_t_non_zero_mu
+    delta_t_tensor[zeros_mask] = delta_t_c_zero
+    delta_t_tensor[where_non_zeros] = delta_t_c_non_zero
 
     return delta_t_tensor
+
+
+def test_scipy(n: int, epsilon: np.ndarray, c: np.ndarray):
+    # pdf = invgauss.rvs(c, size=n)
+    # pdf = pdf
+    # geninvgauss()
+    mean = epsilon / c
+    scale = epsilon ** 2
+    mu = mean / 2 / scale
+    x = np.random.normal(size=(n,))
+    u = np.random.uniform(size=(n,))
+
+    y = mean * x * x
+    x = mean + mu * (y - np.sqrt(4*scale*y + y*y))
+    print(np.sum(np.isnan(x)))
+    b = np.where(u > mean/(mean + x), mean*mean/x, x)
+    b_w = np.where(np.logical_not(np.isnan(b)))
+    b = b[b_w]
+    print(b.shape)
+    return b
 
 
 def sample_truncated_normal(mean: torch.Tensor, scale: torch.Tensor, a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
@@ -132,13 +125,13 @@ def sample_truncated_normal(mean: torch.Tensor, scale: torch.Tensor, a: torch.Te
     [1]https://discuss.pytorch.org/t/implementing-truncated-normal-initializer/4778/21
     [2]The Truncated Normal Distribution
     Args:
-        mean (torch.Tensor): Truncated normal mean
-        scale (torch.Tensor): Truncated normal scale
-        a (torch.Tensor): Truncated normal lower bound
-        b (torch.Tensor): Truncated normal upper bound
+        mean (torch.Tensor): [description]
+        scale (torch.Tensor): [description]
+        a (torch.Tensor): [description]
+        b (torch.Tensor): [description]
 
     Returns:
-        torch.Tensor: Sampled truncated normal tensor
+        torch.Tensor: [description]
     """
     assert mean.shape == scale.shape
     assert scale.shape == a.shape
@@ -160,30 +153,77 @@ def sample_truncated_normal(mean: torch.Tensor, scale: torch.Tensor, a: torch.Te
     return out
 
 
-def event_generation(ep_on, ep_off, mu, sigma, delta_vd_res, start_t, end_t, x=None, y=None):
-    '''
-    Note:
-    Input:
-        :param ep_on: target voltage change of an ON event
-        :param ep_off: target voltage change of an OFF event
-        :param mu: drift parameter of Brownian motion with drift
-        :param sigma: scale parameter of Brownian motion with drift
-        :param delta_vd_res: residual voltage change (delta vd) of the simulation between the last two adjacent frames
-        :param start_t: timestamp of the last event
-        :param end_t: timestamp of the 2nd frame
-        :param x: x position
-        :param y: y position
-    :return:
-        events_t: us
-        events_x:
-        events_y:
-        events_p: {0, 1}
-        delta_vd_res_new: updated residual voltage change (delta vd)
-    '''
+def gaussian_cdf(x, mu=0.0, sigma=1.0):
+    fai = (torch.erf((x - mu) / sigma / math.sqrt(2)) + 1) * 0.5
+    return fai
+
+
+def inverse_gaussian_cdf_diff(x1, x2, lamb, mu):
+    # assume x1 < x2
+    k = 2 * lamb / mu
+
+    lx1 = torch.sqrt(lamb / x1)
+    x1_1 = lx1 * (x1 / mu - 1)
+    x1_2 = -1 * lx1 * (x1 / mu + 1)
+
+    lx2 = torch.sqrt(lamb / x2)
+    x2_1 = lx2 * (x2 / mu - 1)
+    x2_2 = -1 * lx2 * (x2 / mu + 1)
+
+    # log1 = torch.log(gaussian_cdf(x1))
+    # log2 = torch.log(gaussian_cdf(x2)) + k
+
+    # cdf = log1 + torch.log1p(torch.exp(log2-log1))
+    # cdf = torch.exp(cdf)
+    part1 = gaussian_cdf(x2_1) - gaussian_cdf(x1_1)
+    part2 = gaussian_cdf(x2_2) - gaussian_cdf(x1_2)
+    part2_log = torch.log(part2) + k
+    part2 = torch.exp(part2_log)
+    cdf = part1 + part2
+    cdf = torch.where(x <= 0, torch.zeros_like(x), cdf)
+    return cdf
+
+
+def inverse_gaussian_pdf(x, lamb, mu):
+    expin = -1 * lamb * torch.pow(x - mu,  2) / 2 / torch.pow(mu, 2) / x
+    k = torch.sqrt(lamb / 2 / math.pi / torch.pow(x, 3))
+    return k * torch.exp(expin)
+
+
+def ig_prob_a_b_NC(a, b, lamb, mu, h: int = 4):
+    # using Newton-Cotes equations
+    if h == 1:
+        para = [0.5, 0.5]
+    elif h == 2:
+        para = [1.0/6, 2.0/3, 1.0/6]
+    elif h == 3:
+        para = [0.125, 0.375, 0.375, 0.125]
+    elif h == 4:
+        para = [7/90.0, 16/45, 2/15, 16/45, 7/90]
+    else:
+        # if h != 4:
+        raise NotImplementedError('h> 4 methods not implemented.')
+    a = torch.clamp_min(a, 0)
+    sub = b - a
+    inter_tensors = [a]
+    inter_tensors.extend([a + sub * i / h for i in range(h-1)])
+    inter_tensors.append(b)
+
+    assert len(inter_tensors) == len(para) == h+1
+
+    out = torch.zeros_like(a)
+    for para_single, inter_tensor_single in zip(para, inter_tensors):
+        out = out + para_single * \
+            inverse_gaussian_pdf(inter_tensor_single, lamb, mu)
+    out = out * sub
+    return out
+
+
+def event_generation(ep_on, ep_off, c, sigma, delta_vd_legacy, start_t, end_t, x=None, y=None):
     assert ep_on.shape == ep_off.shape
-    assert ep_on.shape == mu.shape
-    assert ep_on.shape == delta_vd_res.shape
-    delta_vd_res = delta_vd_res.double()
+    assert ep_on.shape == c.shape
+    assert ep_on.shape == delta_vd_legacy.shape
+    delta_vd_legacy = delta_vd_legacy.double()
 
     if x is None:
         assert y is None  # stands for 2 dim tensors
@@ -192,78 +232,84 @@ def event_generation(ep_on, ep_off, mu, sigma, delta_vd_res, start_t, end_t, x=N
         h = torch.arange(h, device=ep_on.device)
         w = torch.arange(w, device=ep_on.device)
         yy, xx = torch.meshgrid(h, w)
-        y = yy.reshape(-1)
         x = xx.reshape(-1)
+        y = yy.reshape(-1)
 
     if len(ep_on.shape) == 2:
         ep_on = ep_on.reshape(-1)
         ep_off = ep_off.reshape(-1)
-        mu = mu.reshape(-1)
-        sigma = sigma.reshape(-1)
-        delta_vd_res = delta_vd_res.reshape(-1)
+        c = c.reshape(-1)
+        delta_vd_legacy = delta_vd_legacy.reshape(-1)
         start_t = start_t.reshape(-1).to(torch.float64)
+        sigma = sigma.reshape(-1)
 
-    # ------------------
-    # Polarity selection: the probability of delta V hitting - ep_on_real before ep_off_real.
-    signed_ep_on_real  = - ep_on - delta_vd_res  # Neg for ON, pos for OFF;
-    signed_ep_off_real =  ep_off - delta_vd_res
+    # first on probs
+    # 判断是先触发ON/OFF事件
+    # ref: 随机过程
+    ep_on_real = ep_on - delta_vd_legacy  # ep to trigger positive OFF
+    ep_off_real = ep_off + delta_vd_legacy   # absolute ep to trigger negative ON
     sigma_squared = torch.pow(sigma, 2.0)
-    exp_2uA = torch.exp(2 * mu * signed_ep_on_real / sigma_squared)
-    exp_2uB = torch.exp(2 * mu * signed_ep_off_real / sigma_squared)
-    p_first_on = (exp_2uA - 1) / (exp_2uA - exp_2uB)  # Eq. (12)
+    exp_2uB = torch.exp(2 * c * ep_off_real / sigma_squared)
+    exp_2uA = torch.exp(-2 * c * ep_on_real / sigma_squared)
+    p_first_on = (exp_2uB - 1) / (exp_2uB - exp_2uA)   # trigger OFF(A) before ON(-B)
     p_first_on = torch.where(torch.isnan(p_first_on), torch.ones_like(
         p_first_on, device=p_first_on.device), p_first_on)
-    p_first_on = torch.where(mu == 0, torch.ones_like(
+    p_first_on = torch.where(c == 0, torch.ones_like(
         p_first_on, device=p_first_on.device) * 0.5, p_first_on)
 
     u = torch.empty_like(p_first_on, device=p_first_on.device)
     u.uniform_()
-    on_mask = u <= p_first_on  # Uniform sampling compared with the probability.
+    on_mask = u <= p_first_on  # 先触发Positive (OFF)事件的mask
 
-    # ------------------
-    # Timestamp sampling
-    signed_ep_input = torch.where(on_mask, signed_ep_on_real, signed_ep_off_real).to(torch.float64)
-    delta_t_step = sample_timestamp(signed_ep_input, mu, sigma)  # sampled time interval for next event
+    ep_input = torch.where(on_mask, ep_on_real, ep_off_real).to(torch.float64)
 
-    nan_mask = torch.isnan(delta_t_step)
-    delta_t_step = torch.nan_to_num(delta_t_step, nan=0.0)
+    c_input = torch.where(on_mask, c, -1 * c)
+    delta_t_step = sample_IG_torch(ep_input, c_input, sigma)  # 采样 $\Delta t$
     t_end_ideal = delta_t_step.to(torch.float64) + start_t.to(torch.float64)
 
-    # valid event is triggered before timestamp of 2nd frame.
-    no_end_mask = t_end_ideal < end_t
-    valid_events_mask = torch.logical_and(no_end_mask, torch.logical_not(nan_mask))
-    events_t = t_end_ideal[valid_events_mask]
-    events_x = x[valid_events_mask]
-    events_y = y[valid_events_mask]
-    events_p = on_mask[valid_events_mask]
+    delta_t_2_ends = t_end_ideal - end_t
+    delta_vd_legacy_new = delta_vd_legacy
 
-    # invalid event is triggered after timestamp of 2nd frame,
-    # update $\Delta V_d^{res}$ for simulation during the next two adjacent frames.
-    last_event_positions = ~no_end_mask
-    delta_vd_res_new = delta_vd_res
-    delta_vd_last = signed_ep_input * (end_t - start_t) / delta_t_step  # proportional
-    delta_vd_res_new[last_event_positions] = delta_vd_res_new[last_event_positions] + delta_vd_last[last_event_positions]
+    still_possible_events = delta_t_2_ends < 0  # 没到end time， 仍有新event可能
 
-    # As for valid events, there is an opportunity to trigger extra events at their positions.
-    # Repeat the event sampling until no more extra valid events generated.
-    if torch.sum(no_end_mask) > 0:
-        ep_on_next = ep_on[no_end_mask]
-        ep_off_next = ep_off[no_end_mask]
-        mu_next = mu[no_end_mask]
-        sigma_next = sigma[no_end_mask]
-        delta_vd_res_next = torch.zeros_like(ep_on_next, device=ep_on_next.device)
-        x_next = x[no_end_mask]
-        y_next = y[no_end_mask]
-        t_next = t_end_ideal[no_end_mask]
+    # last_event_positions = torch.logical_not(still_possible_events)
+    # 超过end time，计算 $\Delta V_d_legacy$
+    last_event_positions = ~still_possible_events
+    # ep_ori = torch.where(on_mask, ep_on, -1 * ep_off)
+    sign = on_mask.to(torch.float64) * 2 - 1
+    ep_signed = sign * ep_input
+    delta_vd_last = ep_signed * (end_t - start_t) / delta_t_step
+    delta_vd_legacy_new[last_event_positions] = delta_vd_legacy_new[last_event_positions] + \
+        delta_vd_last[last_event_positions]
+
+    # collect events
+    # this_event_positions = torch.nonzero(still_possible_events)
+    this_event_positions = still_possible_events
+    events_t = t_end_ideal[this_event_positions]
+    events_x = x[this_event_positions]
+    events_y = y[this_event_positions]
+    events_p = on_mask[this_event_positions]
+
+    # if len(this_event_positions[0]) > 0:
+    if torch.sum(this_event_positions) > 0:
+        ep_on_next = ep_on[this_event_positions]
+        ep_off_next = ep_off[this_event_positions]
+        c_next = c[this_event_positions]
+        delta_vd_next = torch.zeros_like(ep_on_next, device=ep_on_next.device)
+        # delta_vd_next_ideal = torch.zeros_like(
+        #     ep_on_next, device=ep_on_next.device)
+        sigma_next = sigma[this_event_positions]
+        x_next = events_x
+        y_next = events_y
+        t_next = events_t
         e_t, e_x, e_y, e_p, e_delta_vd = event_generation(
-            ep_on_next, ep_off_next, mu_next, sigma_next, delta_vd_res_next, t_next, end_t, x_next, y_next)
+            ep_on_next, ep_off_next, c_next, sigma_next, delta_vd_next, t_next, end_t, x_next, y_next)
 
         events_t = torch.cat([events_t, e_t])
         events_x = torch.cat([events_x, e_x])
         events_y = torch.cat([events_y, e_y])
         events_p = torch.cat([events_p, e_p])
 
-        delta_vd_res_new[no_end_mask] = e_delta_vd
+        delta_vd_legacy_new[still_possible_events] = e_delta_vd
 
-    return events_t, events_x, events_y, events_p, delta_vd_res_new
-
+    return events_t, events_x, events_y, events_p, delta_vd_legacy_new
