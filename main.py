@@ -75,20 +75,11 @@ def process_dir(cfg, file_info, video_name):
             num_on_events += np.sum(event[:, -1] == 1)
             num_off_events += np.sum(event[:, -1] == 0)
 
-        # visualization: save stacked event images
-        if (i + 1) % cfg.Visual.FRAME_STEP == 0:
-            events = np.concatenate(events, axis=0)
-            if events.shape[0] > 0:
-                event_tensor = events_to_voxel_grid(np.ascontiguousarray(events, dtype=np.float32),
-                                                    num_bins=cfg.Visual.FRAME_STEP,
-                                                    width=image.shape[1], height=image.shape[0])
-                visual_voxel_grid(event_tensor,
-                                  output_folder=os.path.join(cfg.DIR.OUT_PATH, video_name),
-                                  filename_key='voxel_%d' % (i + 1))
-            events = []
-
         pbar.set_description(f"Events generated: {num_events}")
         pbar.update(1)
+
+    events = np.concatenate(events, axis=0)
+    np.savetxt(os.path.join(cfg.DIR.OUT_PATH, video_name + '.txt'), events, fmt='%1.0f')
     sim.reset()
 
 
