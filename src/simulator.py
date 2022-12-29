@@ -106,7 +106,10 @@ class EventSim(object):
                                                      self.delta_vd_res, self.t_now, t_frame)
         if e_t.shape[0] > 0:
             e_t = torch.round(e_t).int()
-            event_tensor = torch.stack([e_t, e_x, e_y, e_p], dim=1).numpy().astype(np.int32)
+            event_tensor = torch.stack([e_t, e_x, e_y, e_p], dim=1)
+            _, sorted_idx = torch.sort(e_t)
+            event_tensor = event_tensor[sorted_idx, :]
+            event_tensor = event_tensor.contiguous().numpy().astype(np.int32)
         else:
             event_tensor = None
 
