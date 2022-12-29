@@ -1,2 +1,11 @@
 ./data_samples/interp/office_zigzag/000.png 000000013767
 ./data_samples/interp/office_zigzag/001.png 000000018173
+./data_samples/interp/office_zigzag/002.png 000000022580
+./data_samples/interp/office_zigzag/003.png 000000026986
+./data_samples/interp/office_zigzag/004.png 000000031393
+./data_samples/interp/office_zigzag/005.png 000000035799
+./data_samples/interp/office_zigzag/006.png 000000040206
+./data_samples/interp/office_zigzag/007.png 000000044612
+./data_samples/interp/office_zigzag/008.png 000000049019
+./data_samples/interp/office_zigzag/009.png 000000053425
+./data_samples/interp/office_zigzag/010.png 000000057832
